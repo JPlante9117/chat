@@ -1,5 +1,11 @@
 import { Socket, io } from "socket.io-client";
 import { useEffect, useState, useRef } from "react";
+import { Input } from "./components/Input";
+import { Button } from "./components/Button";
+import { Chat } from "./components/Chat";
+import { cx } from "./utils";
+
+import type { MessageItem } from "./types";
 
 const connectChatServer = (user: string) => {
   const socket = io("localhost:3000", {
@@ -19,30 +25,25 @@ const disconnectChatServer = (socket: Socket | null) => {
   }
 };
 
-type MessageItem = {
-  message: string;
-  user: User;
-  type: string;
-};
-
-type User = {
-  name: string;
-  color: string;
-};
-
 export default function App() {
   const [user, setUser] = useState<string>("");
-  const [userColor, setUserColor] = useState<string>("#000");
   const [messageList, setMessageList] = useState<MessageItem[]>([]);
-  const [socketIsConnected, setSocketIsConnected] = useState<boolean>(false);
   const [userIsSignedIn, setUserIsSignedIn] = useState<boolean>(false);
-  const [autoScrollEnabled, setAutoScrollEnabled] = useState<boolean>(true);
+  const [isConnected, setIsConnected] = useState<boolean>(false);
   const userSocket = useRef<Socket | null>(null);
-  const outerChatRef = useRef<HTMLDivElement>(null);
+  const messageRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (userIsSignedIn) {
       userSocket.current = connectChatServer(user);
+
+      userSocket.current?.on("connect", () => {
+        setIsConnected(true);
+      });
+
+      userSocket.current?.on("disconnect", () => {
+        setIsConnected(false);
+      });
 
       userSocket.current.on("server-message", (data) => {
         setMessageList((list: MessageItem[]) => [
@@ -58,54 +59,10 @@ export default function App() {
   }, [userIsSignedIn, user]);
 
   useEffect(() => {
-    if (autoScrollEnabled) {
-      scrollToBottom();
+    if (isConnected) {
+      messageRef.current?.focus();
     }
-  }, [messageList]);
-
-  const messages = messageList.map((item, idx) => {
-    let returnMessage = "";
-
-    if (item.type === "chat") {
-      returnMessage = `: ${item.message}`;
-    } else if (item.type === "connect" || item.type === "disconnect") {
-      returnMessage = ` has ${item.type}ed ${
-        item.type === "connect" ? "to" : "from"
-      } chat.`;
-    } else if (item.type === "banned") {
-      returnMessage = " has been BANNED!";
-    }
-
-    if (!returnMessage) {
-      return null;
-    }
-
-    return (
-      <li key={idx}>
-        <span style={{ color: item.user.color }}>{item.user.name}</span>
-        {returnMessage}
-      </li>
-    );
-  });
-
-  function scrollToBottom() {
-    outerChatRef.current?.scrollTo({
-      top: outerChatRef.current?.scrollHeight ?? 0,
-      behavior: "smooth",
-    });
-  }
-
-  function scrollHandler(event: React.UIEvent<HTMLDivElement>) {
-    let scrollBox = event.currentTarget,
-      isBottom =
-        scrollBox.clientHeight === scrollBox.scrollHeight - scrollBox.scrollTop;
-
-    if (isBottom) {
-      setAutoScrollEnabled(true);
-    } else {
-      setAutoScrollEnabled(false);
-    }
-  }
+  }, [isConnected]);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -121,53 +78,61 @@ export default function App() {
   }
 
   return (
-    <div className="app">
-      <h1>Game Chat</h1>
-      <div className="nav">
-        <input
-          type="text"
-          placeholder="Username"
-          name="username"
-          className="username input"
-          disabled={userIsSignedIn}
-          value={user ?? ""}
-          onChange={(event: React.FormEvent<HTMLInputElement>) =>
-            setUser(event.currentTarget.value)
-          }
-        />
-        <button
-          className="connect"
-          onClick={() => setUserIsSignedIn(!userIsSignedIn)}
-          disabled={user === ""}
-        >
-          {userIsSignedIn ? "Disconnect" : "Connect"}
-        </button>
-      </div>
-
-      {!userIsSignedIn ? null : (
-        <>
-          <div
-            className="outer-chat"
-            ref={outerChatRef}
-            onScroll={scrollHandler}
+    <div className="m-auto p-6 md:max-w-screen-md w-full">
+      <div className="bg-gray-50 py-6 rounded-lg">
+        <div className="w-full">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              setUserIsSignedIn(!userIsSignedIn);
+            }}
+            className="flex px-6"
           >
-            <ul className="chat">{messages}</ul>
-          </div>
-
-          <form className="send-message" onSubmit={onSubmit} method="POST">
-            <input
+            <Input
               type="text"
-              className="message"
-              name="message"
-              placeholder="Message"
-              autoComplete="off"
+              placeholder="Enter a username to start chatting"
+              name="username"
+              disabled={userIsSignedIn}
+              value={user ?? ""}
+              onChange={(event: React.FormEvent<HTMLInputElement>) =>
+                setUser(event.currentTarget.value)
+              }
+              className="mr-6"
             />
-            <button className="send" type="submit">
-              Send
-            </button>
+            <Button
+              type="submit"
+              className={cx(isConnected ? "bg-red-700" : "bg-green-700")}
+              disabled={user === "" || (userIsSignedIn && !isConnected)}
+            >
+              {userIsSignedIn
+                ? isConnected
+                  ? "Disconnect"
+                  : "Connecting..."
+                : "Connect"}
+            </Button>
           </form>
-        </>
-      )}
+        </div>
+
+        {!userIsSignedIn ? null : (
+          <>
+            <Chat messages={messageList} />
+            <form className="flex px-6" onSubmit={onSubmit} method="POST">
+              <Input
+                ref={messageRef}
+                type="text"
+                name="message"
+                placeholder="Type a message"
+                autoComplete="off"
+                className="mr-6"
+                disabled={!isConnected}
+              />
+              <Button className="send" type="submit" disabled={!isConnected}>
+                Send
+              </Button>
+            </form>
+          </>
+        )}
+      </div>
     </div>
   );
 }
